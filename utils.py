@@ -2,6 +2,8 @@ import numpy as np
 import re
 import open3d as o3d
 from skimage import measure
+from scipy.ndimage import gaussian_filter
+from tqdm import tqdm
 import os
 
 
@@ -147,7 +149,7 @@ def mesh_from_voxels(voxel_grid, voxel_size=1.0, origin=np.array([0, 0, 0]), lev
         voxel_grid, level=level, spacing=(voxel_size, voxel_size, voxel_size)
     )
 
-    # Переводим обратно в координаты камеры
+    # Переводим обратно в координаты воксельной сетки
     cam_vertices = vertices * voxel_size + origin
 
     mesh = o3d.geometry.TriangleMesh()
@@ -182,13 +184,13 @@ def save_mesh_to_x_format(
 
         # Точки
         f.write(f"{len(vertices)};\n")
-        for v in vertices:
+        for v in tqdm(vertices, desc='Vertices', unit=' points', unit_scale=1):
             f.write(f"{v[0]};{v[1]};{v[2]};,\n")
         f.write("\n")
 
         # Треугольники
         f.write(f"{len(faces)};\n")
-        for face in faces:
+        for face in tqdm(faces, desc='Faces', unit=' triangles', unit_scale=1):
             f.write(f"3;{face[0]},{face[1]},{face[2]};,\n")
         f.write("\n")
 
@@ -196,11 +198,11 @@ def save_mesh_to_x_format(
         if normals is not None and len(normals) == len(vertices):
             f.write("MeshNormals {\n")
             f.write(f"{len(normals)};\n")
-            for n in normals:
+            for n in tqdm(normals, desc='Normals Vertices', unit=' vectors', unit_scale=1):
                 f.write(f"{n[0]};{n[1]};{n[2]};,\n")
             f.write("\n")
             f.write(f"{len(faces)};\n")
-            for face in faces:
+            for face in tqdm(normals, desc='Normals Faces', unit=' vectors', unit_scale=1):
                 f.write(f"3;{face[0]},{face[1]},{face[2]};,\n")
             f.write("}\n\n")
 
@@ -212,11 +214,32 @@ def save_mesh_to_x_format(
                 f.write("}\n")
             f.write("MeshTextureCoords {\n")
             f.write(f"{len(texture_coords)};\n")
-            for t in texture_coords:
+            for t in tqdm(texture_coords, desc='Texture coords', unit=' coords', unit_scale=1):
                 f.write(f"{t[0]};{t[1]};,\n")
             f.write("}\n")
 
         f.write("}\n")
+
+
+def write_mesh_to_x(mesh: o3d.geometry.TriangleMesh, filename: str, save_normals: bool = True, save_texture: bool = True) -> None:
+    vertices = np.asarray(mesh.vertices)
+    faces = np.asarray(mesh.triangles)
+    normals = texture_coords = texture_filename = None
+    if save_normals:
+        normals = np.asarray(mesh.vertex_normals)
+
+    if save_texture:
+        texture_coords = np.asarray(mesh.texture_coords)
+        texture_filename = str(mesh.texture_filename)
+
+    save_mesh_to_x_format(
+        filename=filename,
+        vertices=vertices,
+        faces=faces,
+        normals=normals,
+        texture_coords=texture_coords,
+        texture_filename=texture_filename
+    )
 
 
 # Конвертация вершин в Open3D PointCloud
@@ -227,9 +250,9 @@ def vertices_to_pcd(vertices: np.ndarray) -> o3d.geometry.PointCloud:
 
 
 # Пересчитывам нормали для PointCloud
-def get_normals_to_pcd(pcd: o3d.geometry.PointCloud, consistent: bool = False) -> o3d.geometry.PointCloud:
+def get_normals_to_pcd(pcd: o3d.geometry.PointCloud, consistent: bool = False, radius=5.0, max_nn=30) -> o3d.geometry.PointCloud:
     pcd.estimate_normals(
-        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=5.0, max_nn=30)
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=max_nn)
     )
     if consistent:
         pcd.orient_normals_consistent_tangent_plane(k=30)
@@ -290,7 +313,7 @@ def full_registration(pcds, max_correspondence_distance_coarse,
     return pose_graph
 
 
-def merge_meshes(meshes: list, grid_size, mcd_coarse_scale=30, mcd_fine_scale=7):
+def merge_meshes(meshes: list, grid_size, mcd_coarse_scale=30, mcd_fine_scale=7, down_sample=False):
     # Считаем размер одного вокселя
     _, _, voxel_size, _ = get_mesh_params(meshes, grid_size)
 
@@ -329,8 +352,38 @@ def merge_meshes(meshes: list, grid_size, mcd_coarse_scale=30, mcd_fine_scale=7)
     for point_id in range(len(pcds)):
         pcds[point_id].transform(pose_graph.nodes[point_id].pose)
         pcd_combined += pcds[point_id]
-    pcd_combined_down = pcd_combined.voxel_down_sample(voxel_size=float(voxel_size))
+    res_psd = pcd_combined
+    if down_sample:
+        res_psd = pcd_combined.voxel_down_sample(voxel_size=float(voxel_size))
 
     # Пересчитаем нормали объединённого PointCloud
-    pcd_norm = get_normals_to_pcd(pcd_combined_down)
-    return pcd_norm
+    pcd_norm = get_normals_to_pcd(res_psd)
+    return pcd_norm, voxel_size
+
+
+def pcd_to_voxel_grid(points, grid_size=256, apply_filter=False):
+    # Нормализуем точки в диапазон [0, grid_size)
+    min_bounds = points.min(axis=0)
+    max_bounds = points.max(axis=0)
+    scale = max_bounds - min_bounds
+    normalized = (points - min_bounds) / scale
+    indices = (normalized * (grid_size - 1)).astype(np.int16)
+
+    # Создаем пустую воксельную сетку
+    volume = np.zeros((grid_size, grid_size, grid_size), dtype=np.int8)
+
+    # Заполняем её (можно аккумулировать плотность или просто наличие точек)
+    for idx in indices:
+        volume[tuple(idx)] = 1
+
+    if apply_filter:
+        volume = gaussian_filter(volume, sigma=0.5)
+
+    return volume, min_bounds, scale
+
+
+def marching_cubes(voxel_grid, voxel_size, level=0.5):
+    vertices, faces, normals, values = measure.marching_cubes(
+        voxel_grid, level=level, spacing=(voxel_size, voxel_size, voxel_size)
+    )
+    return vertices, faces, normals, values
