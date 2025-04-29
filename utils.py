@@ -112,7 +112,7 @@ def apply_transformation(vertices: np.ndarray, matrix4x4: np.ndarray) -> np.ndar
     vertices_hom = np.hstack([vertices, ones])  # (N, 4)
 
     # Применим калибровку
-    transformed = vertices_hom @ matrix4x4.T  # (N, 4)
+    transformed = vertices_hom @ matrix4x4  # (N, 4)
     return transformed[:, :3]
 
 
