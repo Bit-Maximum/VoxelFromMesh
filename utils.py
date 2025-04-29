@@ -272,13 +272,13 @@ def save_mesh_to_x_format(
         # Точки
         f.write(f"{len(vertices)};\n")
         for v in tqdm(vertices, desc="Vertices", unit=" points", unit_scale=1):
-            f.write(f"{v[0]};{v[1]};{v[2]};,\n")
+            f.write(f"{v[2]};{v[1]};{v[0]};,\n")
         f.write("\n")
 
         # Треугольники
         f.write(f"{len(faces)};\n")
         for face in tqdm(faces, desc="Faces", unit=" triangles", unit_scale=1):
-            f.write(f"3;{face[0]},{face[1]},{face[2]};,\n")
+            f.write(f"3;{face[2]},{face[1]},{face[0]};,\n")
         f.write("\n")
 
         # Нормали
@@ -288,13 +288,13 @@ def save_mesh_to_x_format(
             for n in tqdm(
                 normals, desc="Normals Vertices", unit=" vectors", unit_scale=1
             ):
-                f.write(f"{n[0]};{n[1]};{n[2]};,\n")
+                f.write(f"{n[2]};{n[1]};{n[0]};,\n")
             f.write("\n")
             f.write(f"{len(faces)};\n")
             for face in tqdm(
                 normals, desc="Normals Faces", unit=" vectors", unit_scale=1
             ):
-                f.write(f"3;{face[0]},{face[1]},{face[2]};,\n")
+                f.write(f"3;{face[2]},{face[1]},{face[0]};,\n")
             f.write("}\n\n")
 
         # Координаты тектстуры
@@ -532,6 +532,9 @@ def merge_meshes(
     pcds_raw = [vertices_to_pcd(m) for m in meshes]
     # Считаем нормали для PointCloud
     pcds_down = [get_normals_to_pcd(pcd) for pcd in pcds_raw]
+
+    # Посмотрим как взаиморасположены меши
+    o3d.visualization.draw_geometries(pcds_down)
 
     # Находим пересечения PointCloud
     pose_graph = full_registration(
