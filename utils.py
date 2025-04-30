@@ -1,8 +1,6 @@
 import numpy as np
 import re
 import open3d as o3d
-from skimage import measure
-from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 
 
@@ -116,122 +114,210 @@ def apply_transformation(vertices: np.ndarray, matrix4x4: np.ndarray) -> np.ndar
     return transformed[:, :3]
 
 
-def get_mesh_params(
-    points: list[np.ndarray], grid_size: int = 256
-) -> (np.ndarray, np.ndarray, float, (np.ndarray, np.ndarray)):
+def vertices_to_pcd(vertices: np.ndarray) -> o3d.geometry.PointCloud:
     """
-    Compute mesh grid parameters from a set of 3D points.
-
-    Parameters
-    ----------
-    points : np.ndarray or list of np.ndarray
-        Input 3D points as a single array or a list of arrays.
-    grid_size : int, optional
-        Number of grid divisions along the largest axis (default is 256).
-
-    Returns
-    -------
-    origin : np.ndarray
-        The minimum coordinates of the bounding box.
-    scale : np.ndarray
-        The size of the bounding box along each axis.
-    voxel_size : float
-        The size of each voxel in the grid.
-    (min_coords, max_coords) : tuple of np.ndarray
-        The minimum and maximum coordinates of the bounding box.
-    """
-    if isinstance(points, list):
-        all_points = np.vstack(points)
-    else:
-        all_points = points.copy()
-
-    min_coords = all_points.min(axis=0)
-    max_coords = all_points.max(axis=0)
-
-    origin = min_coords.copy()
-    scale = max_coords - min_coords
-    voxel_size = scale.max() / grid_size
-    return origin, scale, voxel_size, (min_coords, max_coords)
-
-
-def build_voxel_grid(
-    points: list[np.ndarray], grid_size: int = 256
-) -> (np.ndarray, np.ndarray, float):
-    """
-    Constructs a voxel grid from one or more arrays of 3D points.
-
-    Parameters
-    ----------
-    points : np.ndarray or list of np.ndarray
-        Input 3D points as a single array or a list of arrays.
-    grid_size : int, optional
-    grid_size : int, optional
-        Number of grid divisions along each axis (default is 256).
-
-    Returns
-    -------
-    voxel_grid : np.ndarray
-        3D array of shape (grid_size, grid_size, grid_size) with 0s and 1s indicating occupied voxels.
-    origin : np.ndarray
-        Minimum coordinates of all points (grid origin).
-    voxel_size : float
-        Size of a single voxel.
-    """
-    if isinstance(points, list):
-        all_points = np.vstack(points)
-    else:
-        all_points = points.copy()
-
-    origin, scale, voxel_size, (min_coords, max_coords) = get_mesh_params(
-        all_points, grid_size
-    )
-
-    # Нормализация координат в диапазон [0, GRID_SIZE]
-    normalized = (all_points - min_coords) / voxel_size
-
-    # Преобразуем в сетку
-    voxel_indices = np.floor(normalized).astype(int)
-    voxel_indices = np.clip(voxel_indices, 0, grid_size - 1)
-
-    # Заполняем воксельную структуру
-    voxel_grid = np.zeros((grid_size, grid_size, grid_size), dtype=np.uint8)
-    voxel_grid[voxel_indices[:, 0], voxel_indices[:, 1], voxel_indices[:, 2]] = 1
-
-    return voxel_grid, origin, voxel_size
-
-
-def mesh_from_voxels(
-    voxel_grid: np.ndarray,
-    voxel_size: float = 1.0,
-    origin: np.ndarray = np.array([0, 0, 0]),
-    level: float = 0.5,
-) -> o3d.geometry.TriangleMesh:
-    """
-    Converts a voxel grid to a mesh using the marching cubes algorithm.
+    Converts a NumPy array of vertices to an Open3D PointCloud object.
 
     Args:
-        voxel_grid (np.ndarray): 3D array of 0s and 1s representing filled voxels.
-        voxel_size (float, optional): Size of each voxel. Defaults to 1.0.
-        origin (np.ndarray, optional): Origin point in camera coordinates. Defaults to [0, 0, 0].
-        level (float, optional): Isosurface value for marching cubes. Defaults to 0.5.
+        vertices (np.ndarray): Array of 3D points with shape (N, 3).
 
     Returns:
-        o3d.geometry.TriangleMesh: Generated mesh from the voxel grid.
+        o3d.geometry.PointCloud: PointCloud containing the input vertices.
     """
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(vertices)
+    return pcd
 
-    vertices, faces, normals, values = measure.marching_cubes(
-        voxel_grid, level=level, spacing=(voxel_size, voxel_size, voxel_size)
+
+def get_normals_to_pcd(
+    pcd: o3d.geometry.PointCloud, consistent: bool = False, radius=5.0, max_nn=30
+) -> o3d.geometry.PointCloud:
+    """
+    Estimates and optionally orients normals for a given point cloud.
+
+    Args:
+        pcd (o3d.geometry.PointCloud): Input point cloud.
+        consistent (bool, optional): If True, orients normals consistently using tangent plane. Defaults to False.
+        radius (float, optional): Search radius for normal estimation. Defaults to 5.0.
+        max_nn (int, optional): Maximum nearest neighbors for normal estimation. Defaults to 30.
+
+    Returns:
+        o3d.geometry.PointCloud: Point cloud with estimated (and possibly oriented) normals.
+    """
+    pcd.estimate_normals(
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=max_nn)
     )
+    if consistent:
+        pcd.orient_normals_consistent_tangent_plane(k=30)
+    return pcd
 
-    # Переводим обратно в координаты воксельной сетки
-    cam_vertices = vertices * voxel_size + origin
 
-    mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(cam_vertices)
-    mesh.triangles = o3d.utility.Vector3iVector(faces)
-    mesh.compute_vertex_normals()
+def compute_triangle_normal(p0: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> float:
+    """
+    Calculates the normal vector of a triangle defined by three 3D points.
 
-    return mesh
+    Args:
+        p0 (np.ndarray): First vertex of the triangle.
+        p1 (np.ndarray): Second vertex of the triangle.
+        p2 (np.ndarray): Third vertex of the triangle.
+
+    Returns:
+        np.ndarray: The normal vector of the triangle.
+    """
+    return np.cross(p1 - p0, p2 - p0)
+
+
+def point_to_triangle_distance(
+    p: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.ndarray
+) -> float:
+    """
+    Calculates the shortest distance from a point to a triangle in 3D space.
+
+    Parameters
+    ----------
+    p : np.ndarray
+        The 3D coordinates of the point.
+    a : np.ndarray
+        The 3D coordinates of the first triangle vertex.
+    b : np.ndarray
+        The 3D coordinates of the second triangle vertex.
+    c : np.ndarray
+        The 3D coordinates of the third triangle vertex.
+
+    Returns
+    -------
+    float
+        The minimum distance from the point to the triangle.
+    """
+    # Истинное расстояние от точки до треугольника в 3D
+    ab = b - a
+    ac = c - a
+    ap = p - a
+
+    d1 = np.dot(ab, ap)
+    d2 = np.dot(ac, ap)
+    if d1 <= 0.0 and d2 <= 0.0:
+        # точка p лежит вне треугольника со стороны вершины a
+        return np.linalg.norm(ap)
+
+    bp = p - b
+    d3 = np.dot(ab, bp)
+    d4 = np.dot(ac, bp)
+    if d3 >= 0.0 and d4 <= d3:
+        # точка p лежит вне треугольника со стороны вершины b
+        return np.linalg.norm(bp)
+
+    vc = d1 * d4 - d3 * d2
+    if vc <= 0.0 and d1 >= 0.0 and d3 <= 0.0:
+        v = d1 / (d1 - d3)
+        proj = a + v * ab
+        # точка p ближе всего к ребру AB.
+        return np.linalg.norm(p - proj)
+
+    cp = p - c
+    d5 = np.dot(ab, cp)
+    d6 = np.dot(ac, cp)
+    if d6 >= 0.0 and d5 <= d6:
+        # точка p лежит вне треугольника со стороны вершины c
+        return np.linalg.norm(cp)
+
+    vb = d5 * d2 - d1 * d6
+    if vb <= 0.0 and d2 >= 0.0 and d6 <= 0.0:
+        w = d2 / (d2 - d6)
+        proj = a + w * ac
+        # точка p ближе всего к ребру AC
+        return np.linalg.norm(p - proj)
+
+    va = d3 * d6 - d5 * d4
+    if va <= 0.0 and (d4 - d3) >= 0.0 and (d5 - d6) >= 0.0:
+        w = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+        proj = b + w * (c - b)
+        # точка p ближе всего к ребру BC.
+        return np.linalg.norm(p - proj)
+
+    # точка p лежит внутри треугольника
+    n = np.cross(ab, ac)
+    n /= np.linalg.norm(n)
+    return abs(np.dot(ap, n))
+
+
+def compute_weight(p: np.ndarray, camera_center: np.ndarray, normal: np.ndarray):
+    """
+    Calculates the weight based on the angle between the viewing direction and the surface normal.
+
+    Parameters
+    ----------
+    p : np.ndarray
+        The 3D point of interest.
+    camera_center : np.ndarray
+        The position of the camera in 3D space.
+    normal : np.ndarray
+        The normal vector at point p.
+
+    Returns
+    -------
+    float
+        The computed weight as the absolute value of the dot product between the normalized viewing direction and the normal.
+    """
+    direction = camera_center - p
+    direction /= np.linalg.norm(direction)
+    weight = abs(np.dot(direction, normal))
+    return weight
+
+
+def integrate_mesh_to_voxel_grid(mesh: dict, voxel_space: dict) -> None:
+    """
+    Integrates a 3D mesh into a voxel grid by updating the distance and weight volumes for each voxel intersecting the mesh triangles.
+
+    Parameters
+    ----------
+    mesh : dict
+        Dictionary containing mesh data with keys "vertices", "faces", and "frame_matrix".
+    voxel_space : dict
+        Dictionary containing voxel grid data with keys "D", "W", "min_bound", and "voxel_size".
+
+    Returns
+    -------
+    None
+        Updates the voxel grid in place.
+    """
+    vertices = mesh["vertices"]
+    faces = mesh["faces"]
+    frame_matrix = mesh["frame_matrix"]
+    camera_center = apply_transformation(np.array([[0.0, 0.0, 0.0]]), frame_matrix)[0]
+
+    D = voxel_space["D"]
+    W = voxel_space["W"]
+    min_bound = voxel_space["min_bound"]
+    voxel_size = voxel_space["voxel_size"]
+
+    for face in tqdm(faces, desc="Faces", unit=" triangles", unit_scale=1):
+        a, b, c = vertices[face[0]], vertices[face[1]], vertices[face[2]]
+        normal = compute_triangle_normal(a, b, c)
+        normal /= np.linalg.norm(normal)
+
+        # Bounding box треугольника в МИРОВЫХ координата
+        tri_min = np.minimum(np.minimum(a, b), c)
+        tri_max = np.maximum(np.maximum(a, b), c)
+
+        # Переводим его в индексы воксельной сетки
+        min_idx = np.floor((tri_min - min_bound) / voxel_size).astype(int)
+        max_idx = np.ceil((tri_max - min_bound) / voxel_size).astype(int)
+
+        for i in range(min_idx[0], max_idx[0] + 1):
+            for j in range(min_idx[1], max_idx[1] + 1):
+                for k in range(min_idx[2], max_idx[2] + 1):
+                    voxel_center = min_bound + voxel_size * (np.array([i, j, k]) + 0.5)
+                    distance = point_to_triangle_distance(voxel_center, a, b, c)
+                    weight = compute_weight(voxel_center, camera_center, normal)
+
+                    if weight == 0.0:
+                        continue  # скипаем неинтересные места
+
+                    D[i, j, k] = (W[i, j, k] * D[i, j, k] + weight * distance) / (
+                        W[i, j, k] + weight
+                    )
+                    W[i, j, k] += weight
 
 
 def save_mesh_to_x_format(
@@ -358,279 +444,3 @@ def write_mesh_to_x(
         texture_coords=texture_coords,
         texture_filename=texture_filename,
     )
-
-
-def vertices_to_pcd(vertices: np.ndarray) -> o3d.geometry.PointCloud:
-    """
-    Converts a NumPy array of vertices to an Open3D PointCloud object.
-
-    Args:
-        vertices (np.ndarray): Array of 3D points with shape (N, 3).
-
-    Returns:
-        o3d.geometry.PointCloud: PointCloud containing the input vertices.
-    """
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(vertices)
-    return pcd
-
-
-def get_normals_to_pcd(
-    pcd: o3d.geometry.PointCloud, consistent: bool = False, radius=5.0, max_nn=30
-) -> o3d.geometry.PointCloud:
-    """
-    Estimates and optionally orients normals for a given point cloud.
-
-    Args:
-        pcd (o3d.geometry.PointCloud): Input point cloud.
-        consistent (bool, optional): If True, orients normals consistently using tangent plane. Defaults to False.
-        radius (float, optional): Search radius for normal estimation. Defaults to 5.0.
-        max_nn (int, optional): Maximum nearest neighbors for normal estimation. Defaults to 30.
-
-    Returns:
-        o3d.geometry.PointCloud: Point cloud with estimated (and possibly oriented) normals.
-    """
-    pcd.estimate_normals(
-        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=max_nn)
-    )
-    if consistent:
-        pcd.orient_normals_consistent_tangent_plane(k=30)
-    return pcd
-
-
-def pairwise_registration(
-    source: o3d.geometry.PointCloud,
-    target: o3d.geometry.PointCloud,
-    max_correspondence_distance_coarse: float,
-    max_correspondence_distance_fine: float,
-) -> (np.ndarray, np.ndarray):
-    """
-    Performs pairwise registration between two point clouds using a two-stage ICP process.
-
-    First applies coarse ICP with point-to-point estimation, then refines with fine ICP using point-to-plane estimation.
-    Returns the final transformation matrix and the information matrix.
-
-    Args:
-        source (o3d.geometry.PointCloud): The source point cloud.
-        target (o3d.geometry.PointCloud): The target point cloud.
-        max_correspondence_distance_coarse (float): Maximum correspondence distance for coarse ICP.
-        max_correspondence_distance_fine (float): Maximum correspondence distance for fine ICP.
-
-    Returns:
-        tuple: (transformation_icp (numpy.ndarray), information_icp (numpy.ndarray))
-    """
-    icp_coarse = o3d.pipelines.registration.registration_icp(
-        source,
-        target,
-        max_correspondence_distance_coarse,
-        np.identity(4),
-        estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-    )
-
-    icp_fine = o3d.pipelines.registration.registration_icp(
-        source,
-        target,
-        max_correspondence_distance_fine,
-        icp_coarse.transformation,
-        o3d.pipelines.registration.TransformationEstimationPointToPlane(),
-    )
-
-    transformation_icp = icp_fine.transformation
-
-    information_icp = (
-        o3d.pipelines.registration.get_information_matrix_from_point_clouds(
-            source, target, max_correspondence_distance_fine, icp_fine.transformation
-        )
-    )
-
-    return transformation_icp, information_icp
-
-
-def full_registration(
-    pcds: list[o3d.geometry.PointCloud],
-    max_correspondence_distance_coarse: float,
-    max_correspondence_distance_fine: float,
-) -> o3d.pipelines.registration.PoseGraph:
-    """
-    Performs full multiway registration of a list of point clouds using pairwise ICP and constructs a pose graph.
-
-    Args:
-        pcds (list of o3d.geometry.PointCloud): List of point clouds to register.
-        max_correspondence_distance_coarse (float): Maximum correspondence distance for coarse ICP.
-        max_correspondence_distance_fine (float): Maximum correspondence distance for fine ICP.
-
-    Returns:
-        o3d.pipelines.registration.PoseGraph: The constructed pose graph with nodes and edges representing the registration results.
-    """
-    pose_graph = o3d.pipelines.registration.PoseGraph()
-    odometry = np.identity(4)
-    pose_graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(odometry))
-    n_pcds = len(pcds)
-    for source_id in range(n_pcds):
-        for target_id in range(source_id + 1, n_pcds):
-            transformation_icp, information_icp = pairwise_registration(
-                source=pcds[source_id],
-                target=pcds[target_id],
-                max_correspondence_distance_coarse=max_correspondence_distance_coarse,
-                max_correspondence_distance_fine=max_correspondence_distance_fine,
-            )
-            print("Build o3d.registration.PoseGraph")
-            if target_id == source_id + 1:  # odometry case
-                odometry = np.dot(transformation_icp, odometry)
-                pose_graph.nodes.append(
-                    o3d.pipelines.registration.PoseGraphNode(np.linalg.inv(odometry))
-                )
-                pose_graph.edges.append(
-                    o3d.pipelines.registration.PoseGraphEdge(
-                        source_id,
-                        target_id,
-                        transformation_icp,
-                        information_icp,
-                        uncertain=False,
-                    )
-                )
-            else:  # loop closure case
-                pose_graph.edges.append(
-                    o3d.pipelines.registration.PoseGraphEdge(
-                        source_id,
-                        target_id,
-                        transformation_icp,
-                        information_icp,
-                        uncertain=True,
-                    )
-                )
-    return pose_graph
-
-
-def merge_meshes(
-    meshes: list,
-    grid_size: int,
-    mcd_coarse_scale: int = 30,
-    mcd_fine_scale: int = 7,
-    down_sample: bool = False,
-) -> (o3d.geometry.PointCloud, float):
-    """
-    Merges multiple meshes by converting them to point clouds, estimating normals, and performing multiway registration and global optimization to align and combine them into a single point cloud.
-
-    Args:
-        meshes (list): List of input meshes as arrays of vertices.
-        grid_size (int): Number of grid divisions for voxel size calculation.
-        mcd_coarse_scale (int, optional): Scale factor for coarse correspondence distance. Defaults to 30.
-        mcd_fine_scale (int, optional): Scale factor for fine correspondence distance. Defaults to 7.
-        down_sample (bool, optional): Whether to downsample the merged point cloud. Defaults to False.
-
-    Returns:
-        tuple: (o3d.geometry.PointCloud, float) — The merged point cloud with normals and the voxel size used.
-    """
-    # Считаем размер одного вокселя
-    _, _, voxel_size, _ = get_mesh_params(meshes, grid_size)
-
-    # Задаём параметры для объединения мешей
-    max_correspondence_distance_coarse = voxel_size * mcd_coarse_scale
-    max_correspondence_distance_fine = voxel_size * mcd_fine_scale
-
-    # Конфертируем все меши в PointCloud
-    pcds_raw = [vertices_to_pcd(m) for m in meshes]
-    # Считаем нормали для PointCloud
-    pcds_down = [get_normals_to_pcd(pcd) for pcd in pcds_raw]
-
-    # Посмотрим как взаиморасположены меши
-    o3d.visualization.draw_geometries(pcds_down)
-
-    # Находим пересечения PointCloud
-    pose_graph = full_registration(
-        pcds_down, max_correspondence_distance_coarse, max_correspondence_distance_fine
-    )
-
-    # Подбираем оптимальные параметры транформации для объединения
-    option = o3d.pipelines.registration.GlobalOptimizationOption(
-        max_correspondence_distance=max_correspondence_distance_fine,
-        edge_prune_threshold=0.25,
-        reference_node=0,
-    )
-    o3d.pipelines.registration.global_optimization(
-        pose_graph,
-        o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
-        o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(),
-        option,
-    )
-
-    # Трансформируем все PointCloud
-    for point_id in range(len(pcds_down)):
-        print(pose_graph.nodes[point_id].pose)
-        pcds_down[point_id].transform(pose_graph.nodes[point_id].pose)
-
-    # Объединяем точки в один PointCloud
-    pcds_raw = [vertices_to_pcd(m) for m in meshes]
-    pcds = [get_normals_to_pcd(pcd) for pcd in pcds_raw]
-    pcd_combined = o3d.pybind.geometry.PointCloud()
-    for point_id in range(len(pcds)):
-        pcds[point_id].transform(pose_graph.nodes[point_id].pose)
-        pcd_combined += pcds[point_id]
-    res_psd = pcd_combined
-    if down_sample:
-        res_psd = pcd_combined.voxel_down_sample(voxel_size=float(voxel_size))
-
-    # Пересчитаем нормали объединённого PointCloud
-    pcd_norm = get_normals_to_pcd(res_psd)
-    return pcd_norm, voxel_size
-
-
-def pcd_to_voxel_grid(
-    points: np.ndarray, grid_size: int = 256, apply_filter: bool = False
-) -> (np.ndarray, np.ndarray, np.ndarray):
-    """
-    Converts a point cloud to a voxel grid representation.
-
-    Normalizes the input points to fit within a cubic grid of specified size,
-    fills the grid based on point occupancy, and optionally applies a Gaussian filter.
-
-    Args:
-        points (np.ndarray): Input point cloud of shape (N, 3).
-        grid_size (int, optional): Size of the voxel grid along each axis. Defaults to 256.
-        apply_filter (bool, optional): Whether to apply a Gaussian filter to the voxel grid. Defaults to False.
-
-    Returns:
-        tuple: (volume, min_bounds, scale) where
-            volume (np.ndarray): The resulting voxel grid.
-            min_bounds (np.ndarray): Minimum bounds of the original points.
-            scale (np.ndarray): Scale used for normalization.
-    """
-    # Нормализуем точки в диапазон [0, grid_size)
-    min_bounds = points.min(axis=0)
-    max_bounds = points.max(axis=0)
-    scale = max_bounds - min_bounds
-    normalized = (points - min_bounds) / scale
-    indices = (normalized * (grid_size - 1)).astype(np.int16)
-
-    # Создаем пустую воксельную сетку
-    volume = np.zeros((grid_size, grid_size, grid_size), dtype=np.int8)
-
-    # Заполняем её (можно аккумулировать плотность или просто наличие точек)
-    for idx in indices:
-        volume[tuple(idx)] = 1
-
-    if apply_filter:
-        volume = gaussian_filter(volume, sigma=0.5)
-
-    return volume, min_bounds, scale
-
-
-def marching_cubes(
-    voxel_grid: np.ndarray, voxel_size: float, level: float = 0
-) -> (np.ndarray, np.ndarray, np.ndarray, np.ndarray):
-    """
-    Extracts a mesh from a 3D voxel grid using the marching cubes algorithm.
-
-    Args:
-        voxel_grid (np.ndarray): 3D array representing the voxel grid.
-        voxel_size (float): Size of each voxel.
-        level (float, optional): Isosurface value to extract. Defaults to 0.5.
-
-    Returns:
-        tuple: vertices (np.ndarray), faces (np.ndarray), normals (np.ndarray), values (np.ndarray) of the extracted mesh.
-    """
-    vertices, faces, normals, values = measure.marching_cubes(
-        voxel_grid, level=level, spacing=(voxel_size, voxel_size, voxel_size)
-    )
-    return vertices, faces, normals, values
