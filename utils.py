@@ -165,6 +165,7 @@ def build_voxel_grid(
     points : np.ndarray or list of np.ndarray
         Input 3D points as a single array or a list of arrays.
     grid_size : int, optional
+    grid_size : int, optional
         Number of grid divisions along each axis (default is 256).
 
     Returns
