@@ -616,7 +616,7 @@ def pcd_to_voxel_grid(
 
 
 def marching_cubes(
-    voxel_grid: np.ndarray, voxel_size: float, level: float = 0.5
+    voxel_grid: np.ndarray, voxel_size: float, level: float = 0
 ) -> (np.ndarray, np.ndarray, np.ndarray, np.ndarray):
     """
     Extracts a mesh from a 3D voxel grid using the marching cubes algorithm.
