@@ -308,6 +308,7 @@ def integrate_mesh_to_voxel_grid(mesh: dict, voxel_space: dict) -> None:
             for j in range(min_idx[1], max_idx[1] + 1):
                 for k in range(min_idx[2], max_idx[2] + 1):
                     voxel_center = min_bound + voxel_size * (np.array([i, j, k]) + 0.5)
+
                     distance = point_to_triangle_distance(voxel_center, a, b, c)
                     weight = compute_weight(voxel_center, camera_center, normal)
 
