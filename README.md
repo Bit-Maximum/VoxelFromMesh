@@ -1,55 +1,92 @@
-# Voxel Fusion 3D Reconstruction: Объединение .x-мешей и генерация 3D-модели
+# 🧊 Voxel Fusion 3D Reconstruction
+## Merging `.x` models and generating a smooth 3D surface
 
-📌 **Краткое описание**  
-Данный проект реализует модифицированный воксельный метод для объединения 3D-моделей, сохранённых в формате `.x`, с последующей реконструкцией единой оболочки на основе интегрального скалярного поля расстояний и весов.  
-Метод позволяет получить гладкую, непрерывную поверхность с наложением текстур, используя множественные точки зрения.
 
-_Автор: Меркурьев М. А._  
-_Дальневосточный федеральный университет, 2025_
+### 👤 Maxim Merkurev
+🏫 _Far Eastern Federal University, 2025_
 
----
+## 📌 About the project
+This project implements a **modified voxel-based method** for merging 3D models saved in the `.x` format, followed by the reconstruction of a unified surface using an **integrated scalar field of distances and weights**.
 
-## 🛠 Основной функционал
-
-- ✅ Загрузка и парсинг `.x`-моделей: вершины, треугольники, UV, трансформации
-- ✅ Преобразование всех мешей в мировую систему координат (`frame_matrix`)
-- ✅ Построение 3D-скалярного поля расстояний (размер: `256³`)
-- ✅ Объединение полей по нормали и глубине
-- ✅ Генерация объединённого меша методом **Marching Cubes**
-- ✅ Сохранение результата в `.x` формате
+The method enables the generation of a **smooth mesh** from multiple viewpoints, incorporating voxelization, alignment by normals and depth, and final reconstruction using the **Marching Cubes** algorithm.
 
 ---
 
+## 🛠 Core Functionality
 
-## 🔍 Примеры визуализации
-
-| Совмещённые точки исходных мешей       | Объединённые точки                      | Меш после марширующих кубиков        |
-|----------------------------------------|-----------------------------------------|--------------------------------------|
-| ![pointclouds](images/pointclouds.png) | ![merged](images/merged_pointcloud.png) | ![final_mesh](images/final_mesh.png) |
-
----
-
-## 🚀 Быстрый старт
-
-1. Установите зависимости:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Поместите исходные .x-файлы в папку `data/`
-
-3. Запустите jupiter-блокнот `run.ipynb`:
-
-4. Готовый меш будет сохранён в файл `output_mesh.x`
+- ✅ Parsing `.x` models: vertices, triangles, UV coordinates, transformations
+- ✅ Aligning all meshes into a shared world coordinate system (`frame_matrix`)
+- ✅ Building a `256³` 3D scalar field based on distance and weight functions
+- ✅ Merging multiple fields based on surface normals and depth alignment
+- ✅ Surface reconstruction using the **Marching Cubes** algorithm
+- ✅ Exporting the final mesh in `.x` format
 
 ---
 
-## 📚 Научная база и вдохновение
+## 🚀 Quick Start
 
-Проект вдохновлён методом предложенным в исследовании:
-- Бобков, В.А. Кудряшов, А.П. *«Модификация воксельного метода для построения единой триангуляционной оболочки объекта по множеству видов»* (2012)
+1. Clone the repository:
+```bash
+git clone https://github.com/Bit-Maximum/Voxel-Fusion-3D-Reconstruction.git
+cd Voxel-Fusion-3D-Reconstruction
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Place your `.x` files into the `data/` folder (or use the provided examples)
+
+4. Launch the Jupyter notebook:
+```bash
+jupyter lab run.ipynb
+```
+
+The final mesh will be saved as `output_mesh.x` in the project root
 
 ---
 
-## 📸 Контекст
-Разработка велась в рамках лабораторной работы по дисциплине "Обработка и визуализация больших объемов графических данных" с использованием воксельных методов.
+## 🔍 Visualization Examples
+
+| Input PointClouds                                 | Merged PointCloud                      | Final Mesh (after Marching Cubes) |
+|---------------------------------------------------|-----------------------------------------|------------------------------------------|
+| ![pointclouds](translation/media/pointclouds.png) | ![merged](translation/media/merged_pointcloud.png) | ![final_mesh](translation/media/final_mesh.png)     |
+
+---
+
+## 🔧 Technologies Used
+
+- Python 3.10+
+- NumPy
+- Open3D
+- SKImage
+- Open3D
+- Matplotlib
+- Jupyter Notebook
+- Собственный парсер `.x`-формата
+
+---
+
+## 📖 Scientific Background
+
+This project is inspired by the method proposed in the following study:
+> Bobkov, V.A., Kudryashov, A.P.
+A modification of the voxel method for constructing a unified triangulated surface of an object from multiple views.
+// Tomsk State University Journal of Mathematics and Mechanics, 2012.
+
+> _Бобков, В.А., Кудряшов, А.П.
+Модификация воксельного метода для построения единой триангуляционной оболочки объекта по множеству видов.
+// Вестник Томского государственного университета. Математика и механика, 2012._
+
+---
+
+## 🧪 Academic Context
+This project was completed as the final assignment for the course:
+📘 **«Processing and Visualization of Large Volumes of Graphic Data»**
+The main focus was the practical implementation of voxel-based fusion and surface generation.
+
+## 📝 Possible Improvements
+* Texture support for the final model
+* Export to `.obj`, `.ply`, or `.glb` formats
+* Interactive result viewer using Open3D
