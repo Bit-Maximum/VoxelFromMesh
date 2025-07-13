@@ -1,6 +1,8 @@
 # 🧊 Voxel Fusion 3D Reconstruction
 ## Merging `.x` models and generating a smooth 3D surface
 
+[![en](https://img.shields.io/badge/lang-en-red.svg)](https://github.com/Bit-Maximum/Voxel-Fusion-3D-Reconstruction/blob/main/README.md)
+[![ru](https://img.shields.io/badge/lang-ru-blue.svg)](https://github.com/Bit-Maximum/Voxel-Fusion-3D-Reconstruction/blob/main/translation/README.ru.md)
 
 ### 👤 Maxim Merkurev
 🏫 _Far Eastern Federal University, 2025_

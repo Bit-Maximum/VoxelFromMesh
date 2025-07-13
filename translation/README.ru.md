@@ -1,6 +1,9 @@
 # 🧊 Voxel Fusion 3D Reconstruction
 ## Объединение `.x`-моделей и генерация гладкой 3D-модели
 
+[![en](https://img.shields.io/badge/lang-en-red.svg)](https://github.com/Bit-Maximum/Voxel-Fusion-3D-Reconstruction/blob/main/README.md)
+[![ru](https://img.shields.io/badge/lang-ru-blue.svg)](https://github.com/Bit-Maximum/Voxel-Fusion-3D-Reconstruction/blob/main/translation/README.ru.md)
+
 
 ### 👤 Меркурьев Максим Алексеевич  
 🏫 _Дальневосточный федеральный университет, 2025_
